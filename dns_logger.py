@@ -19,8 +19,9 @@ class LogType(Enum):
     NO_ANSWER = auto(), "no_answer_for_query"
     CACHE = auto(), "cache"
     ERROR = auto(), "error"
+    ROOT_SRVRS = auto(), "root_servers"
 
-    def __new__(cls, val, entry_name: str) -> LogType:
+    def __new__(cls, val, _: str) -> LogType:
         obj = object.__new__(cls)
         obj._value_ = val
         return obj
@@ -45,7 +46,8 @@ default_config: dict[LogType, bool] = \
     LogType.SENT_MSG_AS_BYTES   : False,
     LogType.RECVD_MSG_AS_BYTES  : False,
     LogType.NO_ANSWER           : True,
-    LogType.ERROR               : True
+    LogType.ERROR               : True,
+    LogType.ROOT_SRVRS          : False
 }
 
 
@@ -67,7 +69,11 @@ class DNS_Logger:
     def read_config(self, path: str):
         from configparser import ConfigParser
         config_file = ConfigParser()
-        config_file.read(path)
+        try:
+            config_file.read(path)
+        except:
+            self.__logger.error(f"Unable to read config file {path}, no changes to settings took place")
+            return
 
         for log_type in LogType:
             self.__log_config.update(
@@ -77,16 +83,16 @@ class DNS_Logger:
             )
 
         target_file: str = config_file.get("Log", "target_file", fallback=None)
-        print(f"target file: {target_file}")
+        print(f"Logger outputs to : {target_file if target_file else 'stdout'}")
         if target_file:
             out_handler = logging.FileHandler(target_file)
         else:
             out_handler = logging.StreamHandler(sys.stdout)
         
-        formatter = logging.Formatter(fmt='%(levelname)-8s :: %(message)s')
+        formatter = logging.Formatter(fmt='%(asctime)s.%(msecs)003d :: %(levelname)-8s :: %(message)s', datefmt='%H:%M:%S')
         out_handler.setFormatter(formatter)
         self.__logger.handlers.clear()
         self.__logger.addHandler(out_handler)
-        self.__logger.info(f"\n\n\n==================== Log Configuration ====================\n{pformat(self.__log_config)}")
+        self.__logger.info(f"\n==================== Log Configuration ====================\n{pformat(self.__log_config)}")
 
 

@@ -1,12 +1,9 @@
-
-
-
 from __future__ import annotations
 from ipaddress import IPv6Address, IPv4Address
 from time import time
 from enum import Enum
 from collections.abc import Iterable
-from typing import TypeVar, Generic, Any
+from typing import TypeVar, Generic
 from inspect import cleandoc
 from typing import final
 
@@ -38,7 +35,7 @@ class RootServer:
         self.__starting_time: int #in milliseconds
 
     def __str__(self) -> str:
-        return f"[ipv6: {self.ipv_6}, ping: {self.ping}]"
+        return f"[RootServer = ipv6: {self.ipv_6}, ipv4: {self.ipv_4} ping: {self.ping}]"
     
     __repr__ = __str__
 
@@ -141,9 +138,9 @@ class Msg:
                 | id:                         {self.__id}
                 | {'RESPONSE' if self.is_resp() else 'QUERY'}
                 """ + \
-                (f'| response code:              {self.__resp_code.name}' if self.is_resp() else '')    + \
-                f"""
-                | op code:                    {self.__op_code.name}
+                (f'''| response code:              {self.__resp_code.name}
+                ''' if self.is_resp() else '')    + \
+                f"""| op code:                    {self.__op_code.name}
                 """ + \
                 ('| Authorative Answer' if self.__auth_answer else '') + \
                 ('| Truncated' if self.__truncated else '') + \

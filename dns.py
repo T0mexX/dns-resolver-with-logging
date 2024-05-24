@@ -1,12 +1,6 @@
-SERVER_ADDRESS = '127.0.0.1'
-SERVER_PORT = 8000
-
-# Please put your code in this file
-
 import argparse
-import signal
-from ipaddress import IPv6Address, ip_address
-from my_dns_classes import RootServer, RR, Msg, Question
+from ipaddress import IPv6Address, ip_address, IPv4Address
+from dns_classes import RootServer, RR, Msg, Question
 import socket
 from threading import Thread
 import threading
@@ -27,18 +21,17 @@ parser.add_argument('--ipv6address', type=str, help='Server IP address')
 parser.add_argument('--ipv6port', type=int, help='Server Port') # smallest port usable by unprivileged users
 parser.add_argument('--ipv4address', type=str, help='Server IP address')
 parser.add_argument('--ipv4port', type=int, help='Server Port')
-parser.add_argument('--logbytes', action='store_true')
+parser.add_argument('--udptimeout', type=float, help='time the server waits for an udp response')
+parser.add_argument('--tcptimeout', type=float, help='time the server waits for a tcp response (no effect if tcp is not used)')
+parser.add_argument('--usetcp', action='store_true', help='if this option is anabled the dns server will establish a tcp connection whenever a received msg is truncated')
 
-# default=None  => to console
-parser.add_argument('--logtofile', type=str, help='file for logging', default=None)
 args = parser.parse_args()
 
 # =============== Config Parsing =================
 config_file: ConfigParser = ConfigParser()
-config_file.read("config.ini")
+config_file.read("dns_config.ini")
 
 HostPort = tuple[str, int]
-print(config_file.getint("ServerSettings", "ipv6_port", fallback=53))
 IPv6_HOSTPORT: HostPort = (
     args.ipv6address if args.ipv6address else config_file.get("ServerSettings", "ipv6_ip", fallback="::1"),
     args.ipv6port if args.ipv6port else config_file.getint("ServerSettings", "ipv6_port", fallback=53)
@@ -47,21 +40,15 @@ IPv4_HOSTPORT: HostPort = (
     args.ipv4address if args.ipv4address else config_file.get("ServerSettings", "ipv4_ip", fallback="localhost"),
     args.ipv4port if args.ipv4port else config_file.getint("ServerSettings", "ipv4_port", fallback=53)
 )
-TCP_ENABLED: bool = config_file.getboolean("ServerSettings", "use_tcp_for_truncated_responses", fallback=False)
-UDP_RECV_TIMEOUT: float = config_file.getfloat("ServerSettings", "udp_recv_timeout", fallback=1)
-TCP_RECV_TIMEOUT: float = config_file.getfloat("ServerSettings", "tcp_recv_timeout", fallback=2)
+TCP_ENABLED: bool = args.usetcp if args.usetcp else config_file.getboolean("ServerSettings", "use_tcp_for_truncated_responses", fallback=False)
+UDP_RECV_TIMEOUT: float = args.udptimeout if args.udptimeout else  config_file.getfloat("ServerSettings", "udp_recv_timeout", fallback=1)
+TCP_RECV_TIMEOUT: float = args.tcptimeout if args.tcptimeout else config_file.getfloat("ServerSettings", "tcp_recv_timeout", fallback=2)
 
 print(f"Serving DNS on port {IPv6_HOSTPORT} and {IPv4_HOSTPORT}")
 
 # =============== Logger =========================
 logger = DNS_Logger()
-logger.read_config("./config.ini")
-
-
-
-logger.info("\n\n\n============== NEW SESSION ==============")
-
-
+logger.read_config("./dns_config.ini")
 
 root_servers: list[tuple[str, str]]= [
     ("198.41.0.4", "2001:503:ba3e::2:30"), ("170.247.170.2", "2801:1b8:10::b"), ("192.33.4.12", "2001:500:2::c"),
@@ -72,7 +59,7 @@ root_servers: list[tuple[str, str]]= [
 ]
 
 root_servers: tuple[RootServer, ...] = tuple(map(
-    lambda t: RootServer(ipv4_ip=t[0],ipv6_ip=IPv6Address(t[1])), root_servers
+    lambda t: RootServer(ipv4_ip=IPv4Address(t[0]),ipv6_ip=IPv6Address(t[1])), root_servers
 ))
 
 def _sort_root_servers(): 
@@ -141,8 +128,14 @@ class QuerySolver(Thread):
         
         target_rr_type: RR.QType = query.questions[0].qtype
         for rr in previous_response.answers:
-            if rr.type == target_rr_type: return previous_response
+            if rr.type == target_rr_type: return previous_response # we got our answers
             elif rr.type == RR.QType.CNAME:
+                '''
+                CNAME just represent an alternative name for our query name, some dns servers just 
+                return the CNAME records as response, but we can also proceed with a new query for 
+                the new name (when returning the response though the rrs in question and answers 
+                sections need to have the original name for Chrome, not needed for Firefox)
+                '''
                 new_query: Msg = Msg.Builder() \
                         .set_id(query.id) \
                         .set_rec_desired(False) \
@@ -152,6 +145,11 @@ class QuerySolver(Thread):
                 if new_q_response: return new_q_response
 
         for rr in previous_response.additional_rrs + previous_response.auth_name_servers:
+            '''
+            We start from additional rrs since often NS records in authoritative section have their 
+            A, AAAA rrs in the additional section, therfore we can proceed contacting those servers 
+            instead of starting a new qury from root for the authoritative name server.
+            '''
             if rr.clas_s not in [RR.QClass.IN, RR.QClass.ALL]: continue
 
             match rr.type:
@@ -161,6 +159,10 @@ class QuerySolver(Thread):
                     if rec_response: return rec_response
                 case RR.QType.AAAA: pass #usually both A and AAAA are received for the same RR
                 case RR.QType.NS:
+                    '''
+                    If we get to NS rrs probably these NS records did not have their corresponding A, AAAA rrs 
+                    in the additional section, therefore we proceed starting a new qury from root
+                    '''
                     new_query: Msg = Msg.Builder() \
                         .set_id(query.id) \
                         .set_rec_desired(False) \
@@ -204,7 +206,7 @@ class QuerySolver(Thread):
             return None
 
     def __send_and_get_resp_tcp(self, query: Msg, hostport: HostPort) -> Msg | None:
-        '''If message is truncated tcp connection has to be established'''
+        '''If message is truncated tcp connection can be established (some servers not even support it though)'''
         logger.info(f"Message truncated, using tcp...")
         try:
             tcp_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -237,7 +239,7 @@ class QuerySolver(Thread):
             .add_question(original_question) \
             .add_answer(  *map(lambda rr: RR(original_question.qname, rr.type, rr.clas_s, rr.ttl, rr.data), final_response.answers) if final_response else [] ) \
             .to_msg()
-        '''Replacing the answers names with the original query names is needed for chrome but not for firefox (not tested with other browsers)'''
+        '''Replacing the answers names with the original query names (in case CNAME was resolved) is needed for chrome but not for firefox (not tested with other browsers)'''
         
         if final_response.answers: cache.add_to_cache(final_response)
         
@@ -268,7 +270,6 @@ class Cache:
             self.__cached.update({question : Cache.EntryValue(response_msg)})
 
     def clear_cache(self):
-
         #filter expired answers in response messages (usually all answers have the same ttl but you never know)
         for _, entry in self.__cached.items():
             now: float = time()
@@ -300,8 +301,11 @@ cache: Cache = Cache()
 ipv6_thread: Thread = Thread(target=_recv_questions_thread_fun, daemon=True, args=(recv_sock_ipv6,)).start()
 ipv4_thread: Thread = Thread(target=_recv_questions_thread_fun, daemon=True, args=(recv_sock_ipv4,)).start()
 
+logger.info( "\n==================== NEW SESSION ==========================")
+
 while True:
     sleep(5)
     _sort_root_servers()
     cache.clear_cache()
-    logger.info(f"Current cache: {cache}")
+    logger.info(f"Current cache: {cache}", LogType.CACHE)
+    logger.info("Current root servers by ping:\n"  + '\n'.join(map(lambda s: str(s), root_servers)), LogType.ROOT_SRVRS)
