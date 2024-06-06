@@ -89,22 +89,22 @@ cache_fetch = True
 ### Some Logging Examples (with different settings):
 
 Formatted messages:
-> ![](formatted_msgs.png) 
+> ![](readme_images/formatted_msgs.png) 
 ---
 From query bytes to query message:
-> ![](msg_from_query_bytes.png)
+> ![](readme_images/msg_from_query_bytes.png)
 ---
 Final response from message to bytes:
->![](final_response_to_bytes.png)
+>![](readme_images/final_response_to_bytes.png)
 ---
 Cahe fetch:
-> ![](cache_fetch.png)
+> ![](readme_images/cache_fetch.png)
 ---
 Cache and Root Servers pings statuses:
-> ![](cache&rootservers_status.png)
+> ![](readme_images/cache&rootservers_status.png)
 ---
 Example of recursive behaviour while solving a query:
-> ![](recursion.png)
+> ![](readme_images/recursion.png)
 
 
 # CodeGrade
