@@ -106,26 +106,5 @@ Cache and Root Servers pings statuses:
 Example of recursive behaviour while solving a query:
 > ![](readme_images/recursion.png)
 
-
-# CodeGrade
-Automatic tests work locally but not on codegrade unless a single python file is uploaded. Hence a merged version of the code is provided in `codegrade_dns.py`. If you want to test it on codegrade you need to change the file name to `dns.py` (careful to not override the `dns.py` original file) and submit the new `dns.py` with `dns_config.ini`.
-```
-cp dns.py dns.bak
-cp codegrade_dns.py dns.py
-```
-![bo](codegrade_example.png)
-> **WARNING:** Tests expect the dns server to listen to 'localhost' port 8000, modify `dns_config.ini` accordingly:
-```
-[ServerSettings]
-...
-ipv4_ip = localhost
-ipv4_port = 8000
-ipv6_ip = ::1
-ipv6_port = 8000
-...
-
-```
-
-
 # Conclusions
 Now you should be able to navigate using this dns server, you will notice it is not as fast as the default one (and speed is highly dependant on the server settings you are using). The program was not written for speed, and being python it would not be fast anyway xD, nevertheless now you can analyze your browser behavior and how domain name resolution works behind the scene for everyday tasks!
